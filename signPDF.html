@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Firmador de PDF Seguro - v3.1</title>
+    
+    <!-- Estilos Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Librerías -->
+    <script src="https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+    <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap');
+        
+        body { font-family: 'Inter', sans-serif; background-color: #f1f5f9; color: #1e293b; }
+        
+        .intro-base {
+            max-width: 600px;
+            margin: 40px auto;
+            padding: 20px;
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            text-align: center;
+        }
+
+        .pdf-scroll-container {
+            overflow: auto;
+            height: 80vh;
+            width: 100%;
+            background-color: #525659;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            display: grid;
+            place-items: start center; 
+        }
+
+        #pdf-wrapper {
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3);
+            background-color: white;
+            position: relative;
+            margin-bottom: 2rem; 
+        }
+
+        #signature-pad {
+            touch-action: none; 
+            cursor: crosshair;
+            background-image: radial-gradient(#cbd5e1 1px, transparent 1px);
+            background-size: 20px 20px;
+            background-color: #fff;
+        }
+
+        .floating-signature {
+            position: absolute;
+            border: 2px dashed #2563eb;
+            cursor: grab;
+            background: rgba(37, 99, 235, 0.1);
+            z-index: 50;
+        }
+        .floating-signature:active {
+            cursor: grabbing;
+            border-color: #1d4ed8;
+            background: rgba(37, 99, 235, 0.2);
+        }
+        
+        .floating-signature .delete-btn {
+            position: absolute;
+            top: -12px;
+            right: -12px;
+            background: #ef4444;
+            color: white;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+            z-index: 60;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+
+        /* NUEVO: Handle de redimensionamiento */
+        .resize-handle {
+            position: absolute;
+            bottom: -8px;
+            right: -8px;
+            width: 20px;
+            height: 20px;
+            background: #2563eb;
+            border: 2px solid white;
+            border-radius: 50%;
+            cursor: nwse-resize;
+            z-index: 61;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        #signature-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 40;
+            cursor: pointer;
+        }
+
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-radius: 50%;
+            border-top: 4px solid #2563eb;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col overflow-hidden">
+
+    <!-- Header Compacto -->
+    <header class="bg-white border-b border-slate-200 sticky top-0 z-50 shadow-sm shrink-0">
+        <div class="w-full px-4 h-14 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+                <span class="text-blue-600 text-xl font-bold">🛡️</span>
+                <h1 class="font-bold text-md tracking-tight text-slate-900">FirmaSegura <span class="text-[10px] text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded-full ml-1">v3.1</span></h1>
+            </div>
+            <div class="flex gap-2">
+                <label for="file-upload" class="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white px-3 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer shadow-sm select-none">
+                    <i data-lucide="upload" class="h-4 w-4"></i> <span>Subir</span>
+                </label>
+                <button id="download-btn" onclick="downloadPDF()" class="hidden flex items-center gap-1.5 bg-green-600 hover:bg-green-700 active:bg-green-800 text-white px-3 py-1.5 rounded-lg text-sm font-medium transition-colors shadow-sm select-none">
+                    <i data-lucide="download" class="h-4 w-4"></i> <span>Guardar</span>
+                </button>
+                <input type="file" id="file-upload" accept="application/pdf" class="hidden">
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="flex-grow flex flex-col p-2 lg:p-4 w-full max-w-[1600px] mx-auto h-[calc(100vh-3.5rem)]">
+        
+        <!-- Error Alert -->
+        <div id="error-message" class="hidden absolute top-4 left-1/2 -translate-x-1/2 z-[70] bg-red-100 border border-red-400 text-red-700 px-6 py-3 rounded-lg shadow-lg text-center max-w-[90%]">
+            <span class="block font-semibold" id="error-text">Error.</span>
+        </div>
+
+        <!-- Intro Screen -->
+        <div id="intro-screen" class="intro-base mt-10 mx-4">
+            <div class="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-4 text-blue-600">
+                <i data-lucide="file-text" class="h-8 w-8"></i>
+            </div>
+            <h2 class="text-xl font-bold text-slate-800 mb-2">Selecciona tu PDF</h2>
+            <p class="text-sm text-slate-500 mb-6">Tus documentos nunca salen de tu dispositivo.</p>
+            
+            <label for="file-upload" class="cursor-pointer block border-2 border-dashed border-slate-300 rounded-xl p-8 hover:border-blue-500 bg-slate-50 hover:bg-blue-50 transition-all">
+                <p class="text-sm text-blue-600 font-semibold">Toca aquí para buscar el archivo</p>
+            </label>
+        </div>
+
+        <!-- Workspace -->
+        <div id="workspace" class="hidden w-full h-full flex flex-col lg:flex-row gap-4">
+            
+            <!-- Left Panel -->
+            <div class="w-full lg:w-80 shrink-0 flex flex-col gap-3 order-2 lg:order-1 pb-4 lg:pb-0">
+                
+                <!-- Signature Pad -->
+                <div class="bg-white p-3 rounded-xl shadow-sm border border-slate-200">
+                    <h3 class="font-semibold text-xs uppercase tracking-wider text-slate-500 mb-2 flex items-center gap-2">
+                        <i data-lucide="pen-tool" class="h-3 w-3"></i> Nueva Firma
+                    </h3>
+                    <div class="border border-slate-300 rounded-lg overflow-hidden bg-white mb-2 relative touch-none shadow-inner">
+                        <canvas id="signature-pad" class="w-full h-28 block" width="300" height="150"></canvas>
+                        <div id="sign-placeholder" class="absolute inset-0 flex items-center justify-center pointer-events-none text-slate-300 text-sm select-none">
+                            Firma aquí
+                        </div>
+                    </div>
+                    <div class="flex gap-2">
+                        <button onclick="clearSignature()" class="flex-1 text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 py-2.5 rounded-lg font-medium">Borrar</button>
+                        <button onclick="captureSignature()" class="flex-1 text-xs bg-slate-800 hover:bg-slate-900 active:bg-black text-white py-2.5 rounded-lg font-medium shadow-sm">Capturar</button>
+                    </div>
+                </div>
+
+                <!-- Captured Signature Preview -->
+                <div id="captured-signature-preview" class="hidden bg-blue-50 p-3 rounded-xl border border-blue-100">
+                    <div class="flex justify-between items-center mb-2">
+                        <span class="text-[10px] font-bold text-blue-600 uppercase">Firma Lista</span>
+                        <span class="text-[10px] text-blue-400">Toca el PDF para colocar</span>
+                    </div>
+                    <div class="bg-white border border-dashed border-blue-200 rounded p-2 flex justify-center h-12">
+                        <img id="preview-img" class="h-full object-contain pointer-events-none" />
+                    </div>
+                </div>
+
+                <!-- Controls -->
+                <div class="bg-white p-3 rounded-xl shadow-sm border border-slate-200">
+                    <div class="flex items-center justify-between mb-2 bg-slate-50 p-1.5 rounded-lg">
+                        <button onclick="changePage(-1)" class="p-1.5 hover:bg-white rounded-md text-slate-600 disabled:opacity-30"><i data-lucide="chevron-left" class="h-5 w-5"></i></button>
+                        <span class="text-xs font-medium text-slate-700 whitespace-nowrap">Pág <span id="page-num">1</span> / <span id="page-count">--</span></span>
+                        <button onclick="changePage(1)" class="p-1.5 hover:bg-white rounded-md text-slate-600 disabled:opacity-30"><i data-lucide="chevron-right" class="h-5 w-5"></i></button>
+                    </div>
+                    <div class="flex gap-2">
+                        <button onclick="zoom(-0.2)" class="flex-1 py-2 text-xs bg-slate-100 hover:bg-slate-200 rounded-lg text-slate-700 font-medium">Alejar</button>
+                        <button onclick="zoom(0.2)" class="flex-1 py-2 text-xs bg-slate-100 hover:bg-slate-200 rounded-lg text-slate-700 font-medium">Acercar</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Panel: PDF Viewer -->
+            <div class="flex-grow order-1 lg:order-2 min-h-0 relative rounded-xl overflow-hidden border border-slate-300 bg-slate-600">
+                <div class="pdf-scroll-container custom-scrollbar h-full">
+                    <div id="pdf-wrapper" class="bg-white">
+                        <canvas id="pdf-render" class="block"></canvas>
+                        <div id="signature-overlay"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Loading Spinner -->
+        <div id="loading" class="hidden fixed inset-0 bg-white/90 backdrop-blur-sm z-[100] flex items-center justify-center flex-col">
+            <div class="loader mb-4"></div>
+            <p id="loading-text" class="text-slate-700 font-semibold animate-pulse">Cargando...</p>
+        </div>
+
+    </main>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            if (typeof lucide !== 'undefined') lucide.createIcons();
+
+            let pdfDoc = null;
+            let pageNum = 1;
+            let pageRendering = false;
+            let pageNumPending = null;
+            let scale = 1.0;
+            let canvas = document.getElementById('pdf-render');
+            let ctx = canvas.getContext('2d');
+            let pdfBytesOriginal = null; 
+            
+            let signaturePad = document.getElementById('signature-pad');
+            let signCtx = signaturePad.getContext('2d');
+            let isDrawing = false;
+            let currentSignatureData = null;
+            let placedSignatures = []; 
+
+            const fileInput = document.getElementById('file-upload');
+            
+            fileInput.addEventListener('change', async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                if (!file.name.toLowerCase().endsWith('.pdf') && file.type !== 'application/pdf') {
+                    showError('El archivo no parece ser un PDF.');
+                    return;
+                }
+
+                showLoading(true, "Abriendo documento...");
+
+                try {
+                    if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
+                        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+                    }
+
+                    const buffer = await file.arrayBuffer();
+                    pdfBytesOriginal = buffer.slice(0); 
+                    
+                    const loadingTask = pdfjsLib.getDocument(new Uint8Array(buffer.slice(0)));
+                    pdfDoc = await loadingTask.promise;
+                    
+                    document.getElementById('page-count').textContent = pdfDoc.numPages;
+                    document.getElementById('intro-screen').classList.add('hidden');
+                    document.getElementById('workspace').classList.remove('hidden');
+                    document.getElementById('workspace').classList.add('flex');
+                    document.getElementById('download-btn').classList.remove('hidden');
+                    
+                    pageNum = 1;
+                    placedSignatures = [];
+                    
+                    const containerWidth = document.querySelector('.pdf-scroll-container').clientWidth;
+                    scale = containerWidth < 600 ? 0.6 : 1.0;
+
+                    renderPage(pageNum);
+
+                } catch (err) {
+                    console.error(err);
+                    showError("Error al leer PDF: " + err.message);
+                } finally {
+                    showLoading(false);
+                }
+            });
+
+            function renderPage(num) {
+                pageRendering = true;
+                renderSignaturesDOM();
+
+                pdfDoc.getPage(num).then(page => {
+                    let viewport = page.getViewport({scale: scale});
+                    
+                    if (scale === 0.6 && window.innerWidth < 600) {
+                       const containerW = document.querySelector('.pdf-scroll-container').clientWidth - 40;
+                       const autoScale = containerW / (viewport.width / scale);
+                       scale = parseFloat(autoScale.toFixed(2));
+                       viewport = page.getViewport({scale: scale});
+                    }
+
+                    canvas.height = viewport.height;
+                    canvas.width = viewport.width;
+
+                    const wrapper = document.getElementById('pdf-wrapper');
+                    wrapper.style.width = `${viewport.width}px`;
+                    wrapper.style.height = `${viewport.height}px`;
+
+                    const renderContext = {
+                        canvasContext: ctx,
+                        viewport: viewport
+                    };
+                    
+                    const renderTask = page.render(renderContext);
+
+                    renderTask.promise.then(() => {
+                        pageRendering = false;
+                        document.getElementById('page-num').textContent = num;
+                        
+                        if (pageNumPending !== null) {
+                            renderPage(pageNumPending);
+                            pageNumPending = null;
+                        }
+                    });
+                });
+            }
+
+            window.changePage = (offset) => {
+                if (!pdfDoc) return;
+                const newPage = pageNum + offset;
+                if (newPage >= 1 && newPage <= pdfDoc.numPages) {
+                    pageNum = newPage;
+                    queueRenderPage(pageNum);
+                }
+            };
+
+            window.zoom = (change) => {
+                if (!pdfDoc) return;
+                const newScale = parseFloat((scale + change).toFixed(1));
+                if (newScale > 0.2 && newScale < 4.0) {
+                    scale = newScale;
+                    queueRenderPage(pageNum);
+                }
+            };
+
+            function queueRenderPage(num) {
+                if (pageRendering) {
+                    pageNumPending = num;
+                } else {
+                    renderPage(num);
+                }
+            }
+
+            function getPos(e) {
+                const rect = signaturePad.getBoundingClientRect();
+                const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+                const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+                return { x: clientX - rect.left, y: clientY - rect.top };
+            }
+
+            function startDrawing(e) {
+                e.preventDefault();
+                isDrawing = true;
+                const pos = getPos(e);
+                signCtx.beginPath();
+                signCtx.moveTo(pos.x, pos.y);
+                document.getElementById('sign-placeholder').style.display = 'none';
+            }
+
+            function draw(e) {
+                if (!isDrawing) return;
+                e.preventDefault();
+                const pos = getPos(e);
+                signCtx.lineWidth = 3;
+                signCtx.lineCap = 'round';
+                signCtx.strokeStyle = '#000';
+                signCtx.lineTo(pos.x, pos.y);
+                signCtx.stroke();
+            }
+
+            function stopDrawing() {
+                isDrawing = false;
+                signCtx.beginPath();
+            }
+
+            signaturePad.addEventListener('mousedown', startDrawing);
+            signaturePad.addEventListener('touchstart', startDrawing, {passive: false});
+            signaturePad.addEventListener('mousemove', draw);
+            signaturePad.addEventListener('touchmove', draw, {passive: false});
+            signaturePad.addEventListener('mouseup', stopDrawing);
+            signaturePad.addEventListener('mouseleave', stopDrawing);
+            signaturePad.addEventListener('touchend', stopDrawing);
+
+            window.clearSignature = () => {
+                signCtx.clearRect(0, 0, signaturePad.width, signaturePad.height);
+                document.getElementById('sign-placeholder').style.display = 'flex';
+                currentSignatureData = null;
+                document.getElementById('captured-signature-preview').classList.add('hidden');
+            };
+
+            window.captureSignature = () => {
+                const data = signCtx.getImageData(0, 0, signaturePad.width, signaturePad.height).data;
+                if (!new Uint32Array(data.buffer).some(x => x !== 0)) {
+                    showError("Por favor escribe tu firma primero.");
+                    return;
+                }
+                currentSignatureData = signaturePad.toDataURL('image/png');
+                document.getElementById('preview-img').src = currentSignatureData;
+                document.getElementById('captured-signature-preview').classList.remove('hidden');
+            };
+
+            const overlay = document.getElementById('signature-overlay');
+
+            overlay.addEventListener('click', (e) => {
+                if (!currentSignatureData) {
+                    if(placedSignatures.length === 0) showError("¡Primero debes capturar tu firma!");
+                    return;
+                }
+                addSignatureToModel(e.clientX, e.clientY);
+            });
+
+            function addSignatureToModel(clientX, clientY) {
+                const rect = overlay.getBoundingClientRect();
+                const x = clientX - rect.left;
+                const y = clientY - rect.top;
+
+                placedSignatures.push({
+                    id: Date.now(),
+                    page: pageNum,
+                    relX: x / rect.width,
+                    relY: y / rect.height,
+                    data: currentSignatureData,
+                    widthPct: 0.25, // Tamaño inicial (25% del ancho)
+                    aspect: signaturePad.width / signaturePad.height
+                });
+                renderSignaturesDOM();
+            }
+
+            function renderSignaturesDOM() {
+                document.querySelectorAll('.floating-signature').forEach(el => el.remove());
+
+                const wrapper = document.getElementById('pdf-wrapper');
+                const wrapperRect = wrapper.getBoundingClientRect();
+                const currentSigs = placedSignatures.filter(s => s.page === pageNum);
+
+                currentSigs.forEach(sig => {
+                    const el = document.createElement('div');
+                    el.className = 'floating-signature';
+                    
+                    const w = wrapperRect.width * sig.widthPct;
+                    const h = w / sig.aspect;
+                    const l = (wrapperRect.width * sig.relX) - (w/2);
+                    const t = (wrapperRect.height * sig.relY) - (h/2);
+
+                    el.style.width = `${w}px`;
+                    el.style.height = `${h}px`;
+                    el.style.left = `${l}px`;
+                    el.style.top = `${t}px`;
+
+                    const img = document.createElement('img');
+                    img.src = sig.data;
+                    img.className = 'w-full h-full object-contain pointer-events-none';
+                    el.appendChild(img);
+
+                    // Botón Borrar
+                    const btn = document.createElement('div');
+                    btn.className = 'delete-btn';
+                    btn.innerHTML = '<i data-lucide="x" style="width:14px; height:14px;"></i>';
+                    btn.onclick = (e) => {
+                        e.stopPropagation();
+                        placedSignatures = placedSignatures.filter(s => s.id !== sig.id);
+                        renderSignaturesDOM();
+                    };
+                    el.appendChild(btn);
+
+                    // Handle de Resize
+                    const resizer = document.createElement('div');
+                    resizer.className = 'resize-handle';
+                    resizer.innerHTML = '<i data-lucide="maximize-2" style="width:10px; height:10px; color:white; transform: rotate(90deg)"></i>';
+                    el.appendChild(resizer);
+
+                    setupDrag(el, sig, wrapper);
+                    setupResize(resizer, sig, wrapper, el);
+                    
+                    wrapper.appendChild(el);
+                });
+                
+                if (typeof lucide !== 'undefined') lucide.createIcons();
+            }
+
+            // Lógica de Movimiento
+            function setupDrag(el, sig, container) {
+                let isDragging = false;
+                let startX, startY;
+
+                const startHandler = (e) => {
+                    if (e.target.closest('.delete-btn') || e.target.closest('.resize-handle')) return;
+                    e.preventDefault();
+                    isDragging = true;
+                    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+                    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+                    startX = clientX;
+                    startY = clientY;
+                    
+                    const moveHandler = (e) => {
+                        if (!isDragging) return;
+                        e.preventDefault();
+                        const cX = e.touches ? e.touches[0].clientX : e.clientX;
+                        const cY = e.touches ? e.touches[0].clientY : e.clientY;
+                        
+                        const dx = cX - startX;
+                        const dy = cY - startY;
+
+                        el.style.left = `${parseFloat(el.style.left) + dx}px`;
+                        el.style.top = `${parseFloat(el.style.top) + dy}px`;
+
+                        startX = cX;
+                        startY = cY;
+                    };
+
+                    const endHandler = () => {
+                        isDragging = false;
+                        document.removeEventListener('mousemove', moveHandler);
+                        document.removeEventListener('touchmove', moveHandler);
+                        document.removeEventListener('mouseup', endHandler);
+                        document.removeEventListener('touchend', endHandler);
+
+                        const rect = container.getBoundingClientRect();
+                        const finalLeft = parseFloat(el.style.left) + (el.offsetWidth / 2);
+                        const finalTop = parseFloat(el.style.top) + (el.offsetHeight / 2);
+                        
+                        sig.relX = finalLeft / rect.width;
+                        sig.relY = finalTop / rect.height;
+                    };
+
+                    document.addEventListener('mousemove', moveHandler);
+                    document.addEventListener('touchmove', moveHandler, {passive: false});
+                    document.addEventListener('mouseup', endHandler);
+                    document.addEventListener('touchend', endHandler);
+                };
+
+                el.addEventListener('mousedown', startHandler);
+                el.addEventListener('touchstart', startHandler, {passive: false});
+            }
+
+            // NUEVO: Lógica de Redimensionamiento
+            function setupResize(handle, sig, container, el) {
+                let isResizing = false;
+                let startX, startWidth;
+
+                const startResize = (e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    isResizing = true;
+                    
+                    startX = e.touches ? e.touches[0].clientX : e.clientX;
+                    startWidth = el.offsetWidth;
+
+                    const moveResize = (e) => {
+                        if (!isResizing) return;
+                        e.preventDefault();
+                        const currentX = e.touches ? e.touches[0].clientX : e.clientX;
+                        const dx = currentX - startX;
+                        
+                        const newWidth = Math.max(40, startWidth + dx);
+                        const containerWidth = container.offsetWidth;
+                        
+                        // Actualizar modelo
+                        sig.widthPct = newWidth / containerWidth;
+                        
+                        // Actualizar UI
+                        el.style.width = `${newWidth}px`;
+                        el.style.height = `${newWidth / sig.aspect}px`;
+                    };
+
+                    const stopResize = () => {
+                        isResizing = false;
+                        document.removeEventListener('mousemove', moveResize);
+                        document.removeEventListener('touchmove', moveResize);
+                        document.removeEventListener('mouseup', stopResize);
+                        document.removeEventListener('touchend', stopResize);
+                        // Reposicionar el centro relativo por si cambió el tamaño
+                        const rect = container.getBoundingClientRect();
+                        sig.relX = (parseFloat(el.style.left) + (el.offsetWidth / 2)) / rect.width;
+                        sig.relY = (parseFloat(el.style.top) + (el.offsetHeight / 2)) / rect.height;
+                    };
+
+                    document.addEventListener('mousemove', moveResize);
+                    document.addEventListener('touchmove', moveResize, {passive: false});
+                    document.addEventListener('mouseup', stopResize);
+                    document.addEventListener('touchend', stopResize);
+                };
+
+                handle.addEventListener('mousedown', startResize);
+                handle.addEventListener('touchstart', startResize, {passive: false});
+            }
+
+            window.downloadPDF = async () => {
+                if (!pdfBytesOriginal) return;
+                showLoading(true, "Firmando documento...");
+
+                try {
+                    const pdfDoc = await PDFLib.PDFDocument.load(pdfBytesOriginal);
+                    const pages = pdfDoc.getPages();
+
+                    for (const sig of placedSignatures) {
+                        const pngImageBytes = await fetch(sig.data).then(res => res.arrayBuffer());
+                        const pngImage = await pdfDoc.embedPng(pngImageBytes);
+                        
+                        const page = pages[sig.page - 1];
+                        const { width, height } = page.getSize();
+
+                        const pdfImgW = width * sig.widthPct;
+                        const pdfImgH = pdfImgW / sig.aspect;
+
+                        const x = (width * sig.relX) - (pdfImgW / 2);
+                        const y = height - (height * sig.relY) - (pdfImgH / 2);
+
+                        page.drawImage(pngImage, {
+                            x: x,
+                            y: y,
+                            width: pdfImgW,
+                            height: pdfImgH,
+                        });
+                    }
+
+                    const pdfBytesSaved = await pdfDoc.save();
+                    const blob = new Blob([pdfBytesSaved], { type: 'application/pdf' });
+                    const link = document.createElement('a');
+                    link.href = URL.createObjectURL(blob);
+                    link.download = `documento_firmado_${Date.now()}.pdf`;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+
+                } catch (err) {
+                    console.error(err);
+                    showError("Error guardando PDF: " + err.message);
+                } finally {
+                    showLoading(false);
+                }
+            };
+
+            function showLoading(show, text) {
+                const el = document.getElementById('loading');
+                if(show) {
+                    el.classList.remove('hidden');
+                    if(text) document.getElementById('loading-text').innerText = text;
+                } else {
+                    el.classList.add('hidden');
+                }
+            }
+
+            function showError(msg) {
+                const el = document.getElementById('error-message');
+                const txt = document.getElementById('error-text');
+                txt.innerText = msg;
+                el.classList.remove('hidden');
+                setTimeout(() => el.classList.add('hidden'), 4000);
+            }
+        });
+    </script>
+</body>
+</html>
